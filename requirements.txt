@@ -1,6 +1,0 @@
-﻿streamlit
-PyPDF2
-python-docx
-sentence-transformers
-transformers
-torch
