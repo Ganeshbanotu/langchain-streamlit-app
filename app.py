@@ -1,6 +1,7 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 import docx
+st.set_page_config(page_title="RAG Chat App", layout="wide")
 from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
 
@@ -12,7 +13,7 @@ def load_models():
 
 embedder, generator = load_models()
 
-st.set_page_config(page_title="RAG Chat App", layout="wide")
+
 st.title("📄 Chat with Your Documents (RAG App)")
 
 # Upload files
