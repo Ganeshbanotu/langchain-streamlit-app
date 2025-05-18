@@ -1,69 +1,75 @@
 import streamlit as st
-from PyPDF2 import PdfReader
-import docx
 import os
-from transformers import pipeline, GPT2Tokenizer
+import tempfile
+import PyPDF2
+import docx
+from transformers import pipeline
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# --- Setup Streamlit ---
+# Must be first
 st.set_page_config(page_title="RAG Chat App", layout="wide")
+
 st.title("📄 Chat with Your Documents (RAG App)")
 
-# --- File uploader ---
-uploaded_files = st.file_uploader(
-    "Upload documents (PDF, DOCX, TXT)",
-    type=["pdf", "docx", "txt"],
-    accept_multiple_files=True,
-    help="Limit 200MB per file • PDF, DOCX, TXT"
-)
+st.markdown("#### Upload documents (PDF, DOCX, TXT)")
+uploaded_files = st.file_uploader("Upload your files", type=["pdf", "docx", "txt"], accept_multiple_files=True)
 
-# --- Extract text from uploaded documents ---
-def extract_text(file):
-    text = ""
-    if file.name.endswith(".pdf"):
-        reader = PdfReader(file)
+@st.cache_data(show_spinner=False)
+def load_document(file):
+    file_type = file.name.split(".")[-1]
+    if file_type == "pdf":
+        reader = PyPDF2.PdfReader(file)
+        text = ""
         for page in reader.pages:
             text += page.extract_text() or ""
-    elif file.name.endswith(".docx"):
+    elif file_type == "docx":
         doc = docx.Document(file)
-        for para in doc.paragraphs:
-            text += para.text + "\n"
-    elif file.name.endswith(".txt"):
-        text += file.read().decode("utf-8")
+        text = "\n".join([para.text for para in doc.paragraphs])
+    elif file_type == "txt":
+        text = file.read().decode("utf-8")
+    else:
+        text = ""
     return text
 
-document_texts = []
+@st.cache_resource
+def get_generator():
+    return pipeline("text-generation", model="gpt2")
+
+generator = get_generator()
+
+# Load and index documents
 if uploaded_files:
-    for uploaded_file in uploaded_files:
-        text = extract_text(uploaded_file)
-        document_texts.append(text)
+    all_text = ""
+    for file in uploaded_files:
+        all_text += load_document(file) + "\n"
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    docs = splitter.create_documents([all_text])
+    chunks = [doc.page_content for doc in docs]
     st.success("✅ Documents processed and indexed!")
 
-# --- Prompt Input ---
-query = st.text_input("Ask a question about the documents:")
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-# --- Answer generation ---
-if query and document_texts:
-    full_context = "\n".join(document_texts)
-    prompt = f"Context: {full_context}\n\nQuestion: {query}\nAnswer:"
+    st.markdown("#### Ask a question about the documents:")
+    user_question = st.text_input("Your question:", key="input_question")
 
-    # --- Load model and tokenizer ---
-    generator = pipeline("text-generation", model="gpt2")
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    if user_question:
+        # Combine the context for basic RAG-like generation
+        context = "\n".join(chunks[:5])  # limit to 5 chunks to reduce input size
+        prompt = f"Context:\n{context}\n\nQuestion: {user_question}\nAnswer:"
+        response = generator(prompt, max_new_tokens=150, do_sample=True, temperature=0.7)[0]["generated_text"]
 
-    # --- Truncate prompt if too long ---
-    max_input_tokens = 1024
-    inputs = tokenizer(prompt, truncation=True, max_length=max_input_tokens, return_tensors="pt")
-    input_ids = inputs["input_ids"]
+        # Extract just the generated answer (optional cleanup)
+        answer = response.split("Answer:")[-1].strip()
 
-    # --- Generate output ---
-    outputs = generator.model.generate(
-        input_ids=input_ids,
-        max_new_tokens=150,
-        do_sample=True,
-        temperature=0.7
-    )
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # Add to history
+        st.session_state.chat_history.append((user_question, answer))
 
-    # --- Display output ---
-    st.markdown("### 💬 Response:")
-    st.write(response)
+    # Display chat history
+    if st.session_state.chat_history:
+        st.markdown("### 💬 Chat History")
+        for i, (q, a) in enumerate(st.session_state.chat_history[::-1]):
+            st.markdown(f"**Q{i+1}: {q}**")
+            st.markdown(f"🟢 {a}")
+            st.markdown("---")
