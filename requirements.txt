@@ -1,6 +1,5 @@
-﻿streamlit
+streamlit
+transformers>=4.30.0
+torch>=2.0.0
 PyPDF2
 python-docx
-sentence-transformers
-transformers
-torch
