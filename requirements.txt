@@ -6,3 +6,11 @@ python-docx
 langchain
 langchain-community
 faiss-cpu
+streamlit
+langchain
+langchain-community
+openai
+pymupdf
+tiktoken
+faiss-cpu
+python-dotenv
