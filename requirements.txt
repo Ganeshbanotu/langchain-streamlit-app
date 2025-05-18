@@ -1,7 +1,9 @@
 streamlit
-langchain
-langchain-community
+langchain==0.1.17
+langchain-community==0.0.34
+transformers
+sentence-transformers
+torch
+faiss-cpu
 PyPDF2
 python-docx
-openai
-faiss-cpu
