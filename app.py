@@ -77,8 +77,8 @@ if uploaded_files:
 
         # Display Q&A history
         for i, (q, a) in enumerate(st.session_state.chat_history):
-            st.markdown(f"*Q{i+1}:* {q}")
-            st.markdown(f"*A{i+1}:* {a}")
+            st.markdown(f"**Q{i+1}:** {q}")
+            st.markdown(f"**A{i+1}:** {a}")
             st.markdown("---")
 
     else:
