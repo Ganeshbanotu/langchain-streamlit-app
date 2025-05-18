@@ -1,6 +1,11 @@
 streamlit
-transformers
-torch
-PyPDF2
+langchain>=0.1.0
+faiss-cpu>=1.7.4
+openai
+PyPDF2>=3.0.1
 python-docx
-langchain
+tiktoken
+pydantic<2
+requests
+numpy
+typing-extensions>=4.5.0
