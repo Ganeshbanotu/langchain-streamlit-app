@@ -1,87 +1,76 @@
+import os
 import streamlit as st
-from langchain.document_loaders import TextLoader
-from langchain.docstore.document import Document
 from langchain.vectorstores import FAISS
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.chains import RetrievalQA
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 from langchain.llms import OpenAI
+from langchain.chains.question_answering import load_qa_chain
+from langchain.docstore.document import Document
 import tempfile
-import os
 
-# Function to extract text depending on file type
-def extract_text_from_file(uploaded_file):
-    if uploaded_file.type == "text/plain":
-        return uploaded_file.getvalue().decode("utf-8")
-    elif uploaded_file.type == "application/pdf":
-        from PyPDF2 import PdfReader
-        reader = PdfReader(uploaded_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text
-    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        import docx
-        doc = docx.Document(uploaded_file)
-        fullText = []
-        for para in doc.paragraphs:
-            fullText.append(para.text)
-        return "\n".join(fullText)
-    else:
-        return ""
-
-st.set_page_config(page_title="RAG Chat App", layout="wide")
-
+st.set_page_config(page_title="Chat with Your Documents", layout="wide")
 st.title("📄 Chat with Your Documents (RAG App)")
+st.subheader("Upload documents (PDF, DOCX, TXT)")
 
-uploaded_files = st.file_uploader(
-    "Upload documents (PDF, DOCX, TXT)",
-    accept_multiple_files=True,
-    type=["pdf", "docx", "txt"]
-)
+uploaded_files = st.file_uploader("Upload your files", type=["pdf", "txt", "docx"], accept_multiple_files=True)
+
+documents = []
+file_names = []
 
 if uploaded_files:
-    # Extract texts with filename metadata
-    all_docs = []
     for uploaded_file in uploaded_files:
-        text = extract_text_from_file(uploaded_file)
-        if text.strip():
-            all_docs.append(Document(page_content=text, metadata={"source": uploaded_file.name}))
+        file_name = uploaded_file.name
+        file_names.append(file_name)
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            tmp_path = tmp_file.name
+
+        if file_name.endswith(".pdf"):
+            loader = PyPDFLoader(tmp_path)
+        elif file_name.endswith(".txt"):
+            loader = TextLoader(tmp_path)
+        elif file_name.endswith(".docx"):
+            loader = Docx2txtLoader(tmp_path)
         else:
-            st.warning(f"Could not extract text from {uploaded_file.name}")
+            st.warning(f"Unsupported file type: {file_name}")
+            continue
 
-    if all_docs:
-        # Embeddings and vectorstore setup
-        embeddings = OpenAIEmbeddings()
-        vectorstore = FAISS.from_documents(all_docs, embeddings)
+        docs = loader.load()
+        for doc in docs:
+            doc.metadata["source"] = file_name
+        documents.extend(docs)
 
-        # Dropdown to select a specific document
-        selected_file = st.selectbox(
-            "Select a document to ask questions about:",
-            options=[doc.metadata["source"] for doc in all_docs]
-        )
+    st.success("✅ Documents processed and indexed!")
 
-        # Create RetrievalQA chain
-        retriever = vectorstore.as_retriever(search_kwargs={"filter": {"source": selected_file}})
-        qa = RetrievalQA.from_chain_type(llm=OpenAI(temperature=0), retriever=retriever)
+    # Select which file to chat with
+    selected_file = st.selectbox("Select a file to chat with:", file_names)
 
-        # Allow multiple Q&A in the same tab, store chat history
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
+    # Filter documents based on selection
+    selected_docs = [doc for doc in documents if doc.metadata.get("source") == selected_file]
 
-        query = st.text_input("Ask a question about the selected document:")
+    # Embed selected docs
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    split_docs = text_splitter.split_documents(selected_docs)
+    embeddings = OpenAIEmbeddings()
+    vectorstore = FAISS.from_documents(split_docs, embeddings)
 
-        if query:
-            # Get answer for the selected file only
-            answer = qa.run(query)
-            st.session_state.chat_history.append((query, answer))
+    # QA chain
+    chain = load_qa_chain(OpenAI(temperature=0), chain_type="stuff")
 
-        # Display Q&A history
-        for i, (q, a) in enumerate(st.session_state.chat_history):
-            st.markdown(f"**Q{i+1}:** {q}")
-            st.markdown(f"**A{i+1}:** {a}")
-            st.markdown("---")
+    # Chat loop
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-    else:
-        st.error("No extractable text found in uploaded files.")
-else:
-    st.info("Please upload one or more documents (PDF, DOCX, TXT) to get started.")
+    user_question = st.text_input("Ask a question about the documents:")
+    if user_question:
+        docs = vectorstore.similarity_search(user_question)
+        answer = chain.run(input_documents=docs, question=user_question)
+
+        # Save and show the chat history
+        st.session_state.chat_history.append((user_question, answer))
+    
+    for q, a in st.session_state.chat_history:
+        st.markdown(f"**You:** {q}")
+        st.markdown(f"**Answer:** {a}")
